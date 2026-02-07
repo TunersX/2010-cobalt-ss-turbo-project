@@ -1,0 +1,6 @@
+# Base requirements (keep minimal; most subsystems are stubs)
+
+# Optional:
+# python-can
+# cantools
+# udsoncan
