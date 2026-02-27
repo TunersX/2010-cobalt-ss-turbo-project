@@ -25,31 +25,25 @@ class PipelineState(str, Enum):
 
 @dataclass
 class Frame:
-    timestamp: str
+    ts: str
+    monotonic_s: float
     can_id: int
     data: list[int]
-    bus: str = "can0"
-
-
-@dataclass
-class Signal:
-    timestamp: str
-    channel: str
-    value: float
-    unit: str
-    source: str
-    confidence: float
-    frame_id: int
+    dlc: int
+    bus: str = "hs_can"
 
 
 @dataclass
 class Anomaly:
-    timestamp: str
-    channel: str
+    id: str
+    timestamp_start: str
+    timestamp_end: str
     severity: str
-    description: str
-    evidence: dict[str, Any] = field(default_factory=dict)
+    channels: list[str]
+    value_summary: dict[str, Any]
+    evidence_pointers: list[dict[str, Any]] = field(default_factory=list)
+    recommended_next_test: str = ""
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")

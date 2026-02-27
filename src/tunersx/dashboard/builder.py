@@ -15,62 +15,74 @@ def build_dashboard(bundle_dir: Path) -> Path:
     report_dir = bundle_dir / "report"
     report_dir.mkdir(exist_ok=True)
 
-    ok, errors = verify_bundle(bundle_dir)
+    ok, verify = verify_bundle(bundle_dir)
     manifest = json.loads((bundle_dir / "manifest.json").read_text(encoding="utf-8"))
-    anomalies = _load_jsonl(bundle_dir / "anomalies.jsonl")
-    signals = _load_jsonl(bundle_dir / "signals.jsonl")[:20]
+    anomalies = sorted(_load_jsonl(bundle_dir / "anomalies.jsonl"), key=lambda a: (a["severity"], a["id"]))
+    signals = _load_jsonl(bundle_dir / "signals.jsonl")
 
-    (report_dir / "anomaly_queue.json").write_text(json.dumps(anomalies, indent=2), encoding="utf-8")
+    capture_quality = manifest.get("capture_stats", {})
+    decoded = len([s for s in signals if s.get("source") == "DBC"])
+    coverage = {
+        "decoded_signals": decoded,
+        "total_signals": len(signals),
+        "top_unknown_ids": capture_quality.get("top_unknown_ids", []),
+    }
 
-    lines = [
+    (report_dir / "anomaly_queue.json").write_text(json.dumps(anomalies, indent=2, sort_keys=True), encoding="utf-8")
+    (report_dir / "capture_quality.json").write_text(json.dumps(capture_quality, indent=2, sort_keys=True), encoding="utf-8")
+    (report_dir / "decode_coverage.json").write_text(json.dumps(coverage, indent=2, sort_keys=True), encoding="utf-8")
+
+    health = {
+        "integrity_status": "PASS" if ok else "FAIL",
+        "policy_mode": manifest.get("policy_snapshot", {}).get("risk_class"),
+        "arming_status": manifest.get("policy_snapshot", {}).get("armed"),
+        "versions": manifest.get("software", {}),
+        "anomaly_count": len(anomalies),
+    }
+    (report_dir / "health_report.json").write_text(json.dumps(health, indent=2, sort_keys=True), encoding="utf-8")
+
+    md = [
         "# TUNERSX Health Report",
+        f"- Integrity Banner: **{'PASS' if ok else 'FAIL'}**",
+        f"- Policy Mode: **{health['policy_mode']}**",
+        f"- Arming Active: **{health['arming_status']}**",
+        f"- Versions: {health['versions']}",
         "",
-        f"- Integrity: {'PASS' if ok else 'FAIL'}",
-        f"- Policy Mode: {manifest.get('policy_mode')}",
-        f"- Schema Version: {manifest.get('schema_version')}",
-        f"- Registry Version: {manifest.get('registry_version')}",
-        f"- DBC Version: {manifest.get('dbc_version')}",
-        "",
-        "## Anomalies",
+        "## Anomaly Queue",
     ]
-    if anomalies:
-        for a in anomalies:
-            lines.append(
-                f"- [{a['severity']}] {a['channel']}: {a['description']} (evidence: {a['evidence']})"
-            )
-    else:
-        lines.append("- No anomalies detected")
+    for a in anomalies:
+        md.append(f"- {a['id']} [{a['severity']}] {a['channels']} evidence={a['evidence_pointers']}")
+    md.append("\n## Signals (units/source/confidence)")
+    for s in signals[:30]:
+        md.append(f"- {s['timestamp']} {s['channel']}={s['value']} {s.get('unit','')} source={s.get('source')} conf={s.get('confidence')} evidence={s.get('evidence_pointer')}")
+    (report_dir / "health_report.md").write_text("\n".join(md) + "\n", encoding="utf-8")
 
-    lines.extend(["", "## Signal Preview (with units/source/confidence)"])
-    for s in signals:
-        lines.append(
-            f"- {s['timestamp']} {s['channel']}={s['value']} {s['unit']} source={s['source']} confidence={s['confidence']} evidence=signals.jsonl:{s['frame_index']+1}"
-        )
-
-    if errors:
-        lines.extend(["", "## Integrity Errors"] + [f"- {e}" for e in errors])
-
-    (report_dir / "health_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-    html = f"""<!doctype html>
-<html><head><meta charset='utf-8'><title>TUNERSX Report</title></head>
-<body>
-<h1>TUNERSX Summary</h1>
-<p>Integrity: <strong>{'PASS' if ok else 'FAIL'}</strong></p>
-<p>Policy mode: <strong>{manifest.get('policy_mode')}</strong></p>
-<p>Schema {manifest.get('schema_version')} | Registry {manifest.get('registry_version')} | DBC {manifest.get('dbc_version')}</p>
-<p>Anomaly count: {len(anomalies)}</p>
+    html = f"""<!doctype html><html><body>
+<div style='padding:8px;background:{'#d1fae5' if ok else '#fecaca'}'><b>Integrity: {'PASS' if ok else 'FAIL'}</b> | Policy: {health['policy_mode']} | Armed: {health['arming_status']}</div>
+<h1>TUNERSX Dashboard</h1>
+<p>Schema: {health['versions'].get('bundle_schema_version')} DBC: {health['versions'].get('dbc_version')} Registry: {health['versions'].get('registry_version')} Vehicle Profile: {health['versions'].get('vehicle_profile_version')}</p>
+<p>Anomalies: {len(anomalies)}</p>
 </body></html>"""
     (report_dir / "index.html").write_text(html, encoding="utf-8")
 
-    summary = report_dir / "summary.txt"
-    summary.write_text("TUNERSX reviewer pack\n", encoding="utf-8")
+    verify_txt = "Offline verification:\n1) run tunersx trace verify bundle\n2) compare SHA256SUMS.txt\n"
+    (report_dir / "VERIFY.txt").write_text(verify_txt, encoding="utf-8")
+
+    bundle_files = sorted({p for p in bundle_dir.iterdir() if p.is_file() and p.suffix in {'.json', '.jsonl', '.csv'}})
+    sums = []
+    from tunersx.audit.integrity import sha256_file
+    for p in bundle_files:
+        sums.append(f"{sha256_file(p)}  {p.name}")
+    (report_dir / "SHA256SUMS.txt").write_text("\n".join(sums) + "\n", encoding="utf-8")
+    (report_dir / "POLICY_SNAPSHOT.json").write_text(json.dumps(manifest.get("policy_snapshot", {}), indent=2, sort_keys=True), encoding="utf-8")
 
     zip_path = report_dir / "reviewer_pack.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name in ["manifest.json", "frames.jsonl", "signals.jsonl", "anomalies.jsonl", "audit.jsonl", "hashes.json"]:
-            zf.write(bundle_dir / name, arcname=name)
-        for name in ["health_report.md", "anomaly_queue.json", "index.html", "summary.txt"]:
-            zf.write(report_dir / name, arcname=f"report/{name}")
+        for p in bundle_files:
+            zf.write(p, arcname=f"bundle/{p.name}")
+        for p in sorted(report_dir.iterdir()):
+            if p.name == "reviewer_pack.zip":
+                continue
+            zf.write(p, arcname=f"report/{p.name}")
 
     return report_dir

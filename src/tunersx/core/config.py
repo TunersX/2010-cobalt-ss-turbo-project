@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 @dataclass
 class DecodeConfig:
     dbc_confidence: float = 0.95
+    pid_confidence: float = 0.90
     derived_confidence: float = 0.70
 
 
@@ -21,8 +22,9 @@ class AnomalyConfig:
 
 @dataclass
 class AppConfig:
-    schema_version: str = "1.0"
-    registry_version: str = "1.0"
-    policy_version: str = "1.0"
+    bundle_schema_version: str = "1.1"
+    registry_version: str = "1.1"
+    policy_version: str = "1.1"
+    vehicle_profile_version: str = "1.0"
     decode: DecodeConfig = field(default_factory=DecodeConfig)
     anomaly: AnomalyConfig = field(default_factory=AnomalyConfig)

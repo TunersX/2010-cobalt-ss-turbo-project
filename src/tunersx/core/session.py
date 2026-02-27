@@ -9,11 +9,12 @@ from tunersx.core.types import PipelineState, RiskClass, utc_now
 SESSION_FILE = ".tunersx_session.json"
 
 
-def save_session(bundle_dir: Path, state: PipelineState, risk_class: RiskClass) -> None:
+def save_session(bundle_dir: Path, state: PipelineState, risk_class: RiskClass, armed_until: str | None = None) -> None:
     payload = {
         "bundle_dir": str(bundle_dir),
         "state": state.value,
         "risk_class": risk_class.value,
+        "armed_until": armed_until,
         "updated_at": utc_now(),
     }
     Path(SESSION_FILE).write_text(json.dumps(payload, indent=2), encoding="utf-8")

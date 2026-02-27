@@ -1,0 +1,18 @@
+version: "1.0"
+identity:
+  platform: gm-delta
+  vehicle: cobalt_ss_turbo_2010
+  engine: lnf
+  transmission: f35
+  differential: g85
+transports:
+  supported:
+    - demo
+    - canable_passive
+    - j2534_readiness
+  expected_bitrate: 500000
+sampling_expectations:
+  IAT: ">=5Hz"
+  KR: ">=5Hz"
+  FUEL_PRESSURE_ACTUAL: ">=5Hz"
+default_channels: [IAT, KR, FUEL_PRESSURE_ACTUAL, FUEL_PRESSURE_TARGET]

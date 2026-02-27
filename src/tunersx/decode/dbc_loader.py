@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 
@@ -15,11 +16,13 @@ DEFAULT_DBC_MAP = {
 
 def load_dbc_map(dbc_file: str | None) -> tuple[dict, str]:
     if dbc_file is None:
-        return DEFAULT_DBC_MAP, "builtin-demo-1.0"
-    path = Path(dbc_file)
-    if not path.exists():
-        raise FileNotFoundError(f"DBC file not found: {dbc_file}")
-    # Minimal loader: expects JSON mapping for deterministic MVP support.
-    import json
-
-    return json.loads(path.read_text(encoding="utf-8")), path.name
+        return DEFAULT_DBC_MAP, "builtin-demo-1.1"
+    merged = {}
+    versions = []
+    for piece in dbc_file.split(","):
+        path = Path(piece.strip())
+        if not path.exists():
+            raise FileNotFoundError(f"DBC file not found: {piece}")
+        merged.update(json.loads(path.read_text(encoding="utf-8")))
+        versions.append(path.name)
+    return merged, "+".join(versions)

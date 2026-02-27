@@ -6,98 +6,66 @@ from pathlib import Path
 from tunersx.core.config import AnomalyConfig
 
 
-def _sustained(values: list[dict], threshold: float, op: str, min_samples: int) -> bool:
-    hits = 0
-    for row in values:
-        val = row["value"]
-        match = val > threshold if op == ">" else val < threshold
-        hits = hits + 1 if match else 0
-        if hits >= min_samples:
-            return True
-    return False
-
-
-def detect_anomalies(signals_file: Path, anomalies_file: Path, config: AnomalyConfig) -> int:
+def detect_anomalies(signals_file: Path, anomalies_file: Path, config: AnomalyConfig) -> tuple[int, list[dict]]:
     signals = [json.loads(line) for line in signals_file.read_text(encoding="utf-8").splitlines() if line.strip()]
     grouped: dict[str, list[dict]] = {}
-    for i, sig in enumerate(signals):
-        sig["line_index"] = i + 1
-        grouped.setdefault(sig["channel"], []).append(sig)
+    for s in signals:
+        grouped.setdefault(s["channel"], []).append(s)
 
-    anomalies: list[dict] = []
-
-    timestamps = [float(s["timestamp"]) for s in signals if str(s.get("timestamp", "")).replace(".", "", 1).isdigit()]
-    if not timestamps or len(timestamps) < len(signals):
-        anomalies.append(
-            {
-                "timestamp": signals[0]["timestamp"] if signals else "0",
-                "channel": "CAPTURE_QUALITY",
-                "severity": "WARN",
-                "description": "Missing or malformed timestamps detected",
-                "evidence": {"signals_line": 1},
-            }
-        )
-    if timestamps:
-        duration = max(timestamps) - min(timestamps)
-        rate = len(timestamps) / duration if duration > 0 else 0
-        if rate < config.min_sample_rate_hz:
-            anomalies.append(
-                {
-                    "timestamp": str(max(timestamps)),
-                    "channel": "CAPTURE_QUALITY",
-                    "severity": "WARN",
-                    "description": f"Low sample rate detected ({rate:.2f}Hz)",
-                    "evidence": {"timestamp_range": [min(timestamps), max(timestamps)]},
-                }
-            )
+    out: list[dict] = []
 
     iat = grouped.get("IAT", [])
     if iat:
-        baseline = min(x["value"] for x in iat)
-        if _sustained(iat, baseline + config.iat_delta_c, ">", config.iat_min_samples):
-            anomalies.append(
+        baseline = min(v["value"] for v in iat)
+        hot = [x for x in iat if x["value"] > baseline + config.iat_delta_c]
+        if len(hot) >= config.iat_min_samples:
+            out.append(
                 {
-                    "timestamp": iat[-1]["timestamp"],
-                    "channel": "IAT",
+                    "id": "ANOM-IAT-001",
+                    "timestamp_start": hot[0]["timestamp"],
+                    "timestamp_end": hot[-1]["timestamp"],
                     "severity": "MED",
-                    "description": f"IAT sustained above baseline + {config.iat_delta_c}C",
-                    "evidence": {"signals_line": iat[-1]["line_index"]},
+                    "channels": ["IAT"],
+                    "value_summary": {"baseline": baseline, "max": max(x["value"] for x in hot)},
+                    "evidence_pointers": [hot[0]["evidence_pointer"], hot[-1]["evidence_pointer"]],
+                    "recommended_next_test": "Heat-soak cooldown pull and re-check intercooler efficiency",
                 }
             )
 
     kr = grouped.get("KR", [])
-    if kr and _sustained(kr, config.kr_threshold_deg, ">", config.kr_min_samples):
-        anomalies.append(
+    high_kr = [x for x in kr if x["value"] > config.kr_threshold_deg]
+    if len(high_kr) >= config.kr_min_samples:
+        out.append(
             {
-                "timestamp": kr[-1]["timestamp"],
-                "channel": "KR",
+                "id": "ANOM-KR-001",
+                "timestamp_start": high_kr[0]["timestamp"],
+                "timestamp_end": high_kr[-1]["timestamp"],
                 "severity": "HIGH",
-                "description": f"Knock retard sustained above {config.kr_threshold_deg} deg",
-                "evidence": {"signals_line": kr[-1]["line_index"]},
+                "channels": ["KR"],
+                "value_summary": {"peak": max(x["value"] for x in high_kr), "density": round(len(high_kr) / max(len(kr), 1), 4)},
+                "evidence_pointers": [high_kr[0]["evidence_pointer"], high_kr[-1]["evidence_pointer"]],
+                "recommended_next_test": "STOP_LOGGING_AND_INSPECT",
             }
         )
 
-    actual = grouped.get("FUEL_PRESSURE_ACTUAL", [])
-    target = grouped.get("FUEL_PRESSURE_TARGET", [])
-    if actual and target:
-        for a, t in zip(actual, target):
-            if t["value"] <= 0:
-                continue
-            dev = abs(a["value"] - t["value"]) / t["value"] * 100
-            if dev > config.fuel_pressure_deviation_pct:
-                anomalies.append(
-                    {
-                        "timestamp": a["timestamp"],
-                        "channel": "FUEL_PRESSURE",
-                        "severity": "MED",
-                        "description": f"Fuel pressure deviation {dev:.1f}% exceeds {config.fuel_pressure_deviation_pct}%",
-                        "evidence": {"signals_line": a["line_index"]},
-                    }
-                )
-                break
+    ferr = grouped.get("FUEL_PRESSURE_ERROR_PCT", [])
+    if ferr and max(abs(x["value"]) for x in ferr) > config.fuel_pressure_deviation_pct:
+        mx = max(ferr, key=lambda x: abs(x["value"]))
+        out.append(
+            {
+                "id": "ANOM-FUEL-001",
+                "timestamp_start": mx["timestamp"],
+                "timestamp_end": mx["timestamp"],
+                "severity": "MED",
+                "channels": ["FUEL_PRESSURE_ERROR_PCT"],
+                "value_summary": {"max_abs_error_pct": abs(mx["value"])},
+                "evidence_pointers": [mx["evidence_pointer"]],
+                "recommended_next_test": "Run rail pressure hold test",
+            }
+        )
 
+    out = sorted(out, key=lambda x: (x["timestamp_start"], x["id"]))
     with anomalies_file.open("w", encoding="utf-8") as f:
-        for row in anomalies:
-            f.write(json.dumps(row) + "\n")
-
-    return len(anomalies)
+        for row in out:
+            f.write(json.dumps(row, sort_keys=True) + "\n")
+    return len(out), out
