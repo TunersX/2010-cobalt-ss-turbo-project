@@ -1,0 +1,1 @@
+{"type":"object","required":["generated_at","software","files","policy_snapshot","transport_config","capture_stats"],"properties":{"software":{"type":"object"},"files":{"type":"array"}}}
