@@ -25,6 +25,7 @@ from tunersx.privacy.scrub import scrub_bundle
 from tunersx.transports.demo import generate_demo_frames
 from tunersx.transports.j2534_readiness import J2534Backend
 from tunersx.orchestration.provider import run_active_operations_provider
+from tunersx.calib.cap import pack_calibration, verify_calibration, diff_calibrations
 
 REQUIRED_FILES = ["frames.jsonl", "signals.jsonl", "anomalies.jsonl", "audit.jsonl"]
 
@@ -468,7 +469,51 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--timeout", type=int, default=30)
     run.set_defaults(func=cmd_orchestration_run)
 
+    calib = sub.add_parser("calib")
+    calib_sub = calib.add_subparsers(dest="calib_cmd", required=True)
+    cpack = calib_sub.add_parser("pack")
+    cpack.add_argument("--input", required=True)
+    cpack.add_argument("--out", required=True)
+    cpack.add_argument("--vin")
+    cpack.add_argument("--module")
+    cpack.add_argument("--notes")
+    cpack.set_defaults(func=cmd_calib_pack)
+
+    cverify = calib_sub.add_parser("verify")
+    cverify.add_argument("cap_dir")
+    cverify.set_defaults(func=cmd_calib_verify)
+
+    cdiff = calib_sub.add_parser("diff")
+    cdiff.add_argument("cap_a")
+    cdiff.add_argument("cap_b")
+    cdiff.set_defaults(func=cmd_calib_diff)
+
     return parser
+
+
+
+def cmd_calib_pack(args: argparse.Namespace) -> int:
+    meta = {
+        "vin": args.vin,
+        "module": args.module,
+        "notes": args.notes,
+    }
+    out = pack_calibration(Path(args.input), Path(args.out), meta)
+    print(f"CAP packed: {out}")
+    return 0
+
+
+def cmd_calib_verify(args: argparse.Namespace) -> int:
+    ok, report = verify_calibration(Path(args.cap_dir))
+    print(json.dumps(report, indent=2, sort_keys=True))
+    print("OK" if ok else "FAIL")
+    return 0 if ok else 1
+
+
+def cmd_calib_diff(args: argparse.Namespace) -> int:
+    report = diff_calibrations(Path(args.cap_a), Path(args.cap_b))
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
 
 
 def main() -> int:
