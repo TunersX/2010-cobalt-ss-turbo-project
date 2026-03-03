@@ -5,6 +5,7 @@ import zipfile
 from pathlib import Path
 
 from tunersx.audit.integrity import verify_bundle
+from tunersx.health.scoring import compute_engine_health
 
 
 def _load_jsonl(path: Path) -> list[dict]:
@@ -39,6 +40,9 @@ def build_dashboard(bundle_dir: Path) -> Path:
         (report_dir / "readiness.json").write_text(json.dumps(readiness, indent=2, sort_keys=True), encoding="utf-8")
 
 
+    engine_health = compute_engine_health(signals, anomalies)
+    (report_dir / "engine_health.json").write_text(json.dumps(engine_health, indent=2, sort_keys=True), encoding="utf-8")
+
     health = {
         "integrity_status": "PASS" if ok else "FAIL",
         "policy_mode": manifest.get("policy_snapshot", {}).get("risk_class"),
@@ -46,6 +50,7 @@ def build_dashboard(bundle_dir: Path) -> Path:
         "versions": manifest.get("software", {}),
         "anomaly_count": len(anomalies),
         "rlink_readiness": readiness.get("overall_ok") if readiness else None,
+        "engine_health": engine_health,
     }
     (report_dir / "health_report.json").write_text(json.dumps(health, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -63,6 +68,8 @@ def build_dashboard(bundle_dir: Path) -> Path:
     if readiness:
         md.append("\n## RLink Readiness")
         md.append(f"- Overall OK: {readiness.get('overall_ok')}")
+    md.append("\n## Engine Health Prototype")
+    md.append(f"- Score: {engine_health.get('score')} Tier: {engine_health.get('tier')}")
     md.append("\n## Signals (units/source/confidence)")
     for s in signals[:30]:
         md.append(f"- {s['timestamp']} {s['channel']}={s['value']} {s.get('unit','')} source={s.get('source')} conf={s.get('confidence')} evidence={s.get('evidence_pointer')}")
@@ -74,6 +81,7 @@ def build_dashboard(bundle_dir: Path) -> Path:
 <p>Schema: {health['versions'].get('bundle_schema_version')} DBC: {health['versions'].get('dbc_version')} Registry: {health['versions'].get('registry_version')} Vehicle Profile: {health['versions'].get('vehicle_profile_version')}</p>
 <p>Anomalies: {len(anomalies)}</p>
 <p>RLink readiness: {readiness.get('overall_ok') if readiness else "n/a"}</p>
+<p>Engine health score: {engine_health.get('score')} ({engine_health.get('tier')})</p>
 </body></html>"""
     (report_dir / "index.html").write_text(html, encoding="utf-8")
 
