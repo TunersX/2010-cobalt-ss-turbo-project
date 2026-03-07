@@ -43,3 +43,10 @@ This repository is documentation‑centric, so there are no software dependencie
 ## License
 
 This work is licensed under the MIT License.  See the `LICENSE` file for full terms.  You are free to fork and adapt these procedures for your own use, but please credit the original author and do not misrepresent documented results.
+
+
+## TUNERSX standalone layout
+
+This repository now includes a standalone `src/tunersx/` product tree and docs/config/data scaffolding for evidence-grade diagnostics workflows.
+
+Safety boundary: PASSIVE capture by default; READ_ONLY diagnostic actions only when policy-allowlisted; no embedded SecurityAccess, no embedded ECU write/programming routines, and no bypass mechanics.
